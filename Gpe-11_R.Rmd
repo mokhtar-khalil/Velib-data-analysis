@@ -1,0 +1,1032 @@
+---
+title: "Projet_Velib"
+output:
+  html_document: default
+  pdf_document: default
+date: "2024-02-16"
+---
+
+```{r}
+library(ggplot2)
+library(reshape)
+library(reshape2)
+library(gridExtra)
+library(factoextra)
+library(FactoMineR)
+library(tidyverse)
+library(cluster)
+
+library(boot)
+library(nortest)
+library(corrplot)
+library(ggmap)
+
+library(caret)
+library(clue)
+
+library(NbClust)
+library(mclust)
+```
+
+
+```{r}
+load("velib.RData")
+summary(velib)
+```
+
+
+#Préparation des données
+
+```{r}
+loading = as.matrix(velib$data)
+colnames(loading) = 1:ncol(loading)
+rownames(loading) = velib$names
+#coord = read.csv("velibCoord.csv")
+#coord = as.matrix(coord)
+
+stations = 1:nrow(loading)
+coord = velib$position[stations,]
+coord$bonus = velib$bonus[stations] # 1 = sur une colline, 0 = non
+
+dates = 14:181
+loading=loading[stations, dates]
+head(loading)
+head(coord)
+```
+
+```{r}
+intervals = unname(c(summary(rowMeans(loading))[2:5],0.7,1.1))
+intervals
+```
+
+```{r}
+
+labels_cat = c("très peu chargé","peu chargé","moyen", "chargé", "très chargé")
+
+# Créer un nouveau DataFrame pour les données catégoriques
+categorical_data <- data.frame(matrix(ncol = ncol(loading), nrow = nrow(loading)))
+colnames(categorical_data) <- colnames(loading)
+
+# Appliquer la transformation
+for (column in colnames(loading)) {
+  categorical_data[,column] <- cut(loading[,column], breaks = intervals, labels = labels_cat, right = FALSE)
+}
+
+categorical_data = replace(categorical_data, is.na(categorical_data), "très peu chargé")
+
+# Afficher les premières lignes du nouveau DataFrame
+head(categorical_data)
+
+
+```
+
+
+# Décomposition des données en jours
+
+```{r}
+loading =as.data.frame(loading)
+
+RemplissageMoyenStation = rowMeans(loading)
+#RemplissageMoyenStationSort = sort(RemplissageMoyenStation, decreasing = TRUE)
+#plot(RemplissageMoyenStationSort)
+
+RemplissageMoyenHeure = colMeans(loading)
+
+
+lundi = loading[,c(0:24)]
+mardi = loading[,c(25:48)]
+mercredi = loading[,c(49:72)]
+jeudi = loading[,c(73:96)]
+vendredi = loading[,c(97:120)]
+samedi = loading[,c(121:144)]
+dimanche = loading[,c(145:168)]
+
+lundiMoyHeure = RemplissageMoyenHeure[c(0:24)]
+mardiMoyHeure = RemplissageMoyenHeure[c(25:48)]
+mercrediMoyHeure = RemplissageMoyenHeure[c(49:72)]
+jeudiMoyHeure = RemplissageMoyenHeure[c(73:96)]
+vendrediMoyHeure = RemplissageMoyenHeure[c(97:120)]
+samediMoyHeure = RemplissageMoyenHeure[c(121:144)]
+dimancheMoyHeure = RemplissageMoyenHeure[c(145:168)]
+
+
+lundiMoy = rowMeans(loading[, c(1:24)])
+mardiMoy = rowMeans(loading[, c(25:48)])
+mercrediMoy = rowMeans(loading[, c(49:72)])
+jeudiMoy = rowMeans(loading[, c(73:96)])
+vendrediMoy = rowMeans(loading[, c(97:120)])
+samediMoy = rowMeans(loading[, c(121:144)])
+dimancheMoy = rowMeans(loading[, c(145:168)])
+
+lundiNuit = as.data.frame(c(lundi[0:7],lundi[20:24]))
+lundiJournee = as.data.frame(c(lundi[8:19]))
+
+mardiNuit = as.data.frame(c(mardi[0:7],mardi[20:24]))
+mardiJournee = as.data.frame(c(mardi[8:19]))
+
+mercrediNuit = as.data.frame(c(mercredi[0:7],mercredi[20:24]))
+mercrediJournee = as.data.frame(c(mercredi[8:19]))
+
+jeudiNuit = as.data.frame(c(jeudi[0:7],jeudi[20:24]))
+jeudiJournee = as.data.frame(c(jeudi[8:19]))
+
+vendrediNuit = as.data.frame(c(vendredi[0:7],vendredi[20:24]))
+vendrediJournee = as.data.frame(c(vendredi[8:19]))
+
+samediNuit = as.data.frame(c(samedi[0:7],samedi[20:24]))
+samediJournee = as.data.frame(c(samedi[8:19]))
+
+dimancheNuit = as.data.frame(c(dimanche[0:7],dimanche[20:24]))
+dimancheJournee = as.data.frame(c(dimanche[8:19]))
+
+
+jours = cbind(lundi,mardi,mercredi,jeudi,vendredi,samedi,dimanche)
+joursMoy = cbind(lundiMoy,mardiMoy,mercrediMoy,jeudiMoy,vendrediMoy,samediMoy,dimancheMoy)
+
+joursJournee = cbind(lundiJournee,mardiJournee,mercrediJournee,jeudiJournee,vendrediJournee,samediJournee,dimancheJournee)
+joursNuit = cbind(lundiNuit,mardiNuit,mercrediNuit,jeudiNuit,vendrediNuit,samediNuit,dimancheNuit)
+
+joursJourneeMoy = cbind(rowMeans(lundiJournee),rowMeans(mardiJournee),rowMeans(mercrediJournee),rowMeans(jeudiJournee),rowMeans(vendrediJournee),rowMeans(samediJournee),rowMeans(dimancheJournee))
+joursNuitMoy = cbind(rowMeans(lundiNuit),rowMeans(mardiNuit),rowMeans(mercrediNuit),rowMeans(jeudiNuit),rowMeans(vendrediNuit),rowMeans(samediNuit),rowMeans(dimancheNuit))
+
+colnames(joursNuitMoy) = c("LundiNuit","MardiNuit", "MercrediNuit","JeudiNuit","VendrediNuit","SamediNuit","DimancheNuit")
+colnames(joursJourneeMoy) = c("LundiJournee","MardiJournee", "MercrediJournee","JeudiJournee","VendrediJournee","SamediJournee","DimancheJournee")
+
+#corrplot(cor(jours),method="ellipse")
+```
+
+```{r}
+# Créer un nouveau DataFrame pour les données catégoriques
+load_quali = data.frame(matrix(ncol = ncol(joursJourneeMoy)*2, nrow = nrow(joursJourneeMoy)))
+#load_quali = rbind(joursJourneeMoy,joursNuitMoy)
+colnames(load_quali) <- c(colnames(joursJourneeMoy),colnames(joursNuitMoy))
+
+# Appliquer la transformation
+for (column in colnames(joursJourneeMoy)) {
+  load_quali[,column] <- cut(joursJourneeMoy[,column], breaks = intervals, labels = labels_cat, right = FALSE)
+}
+for (column in colnames(joursNuitMoy)) {
+  load_quali[,column] <- cut(joursNuitMoy[,column], breaks = intervals, labels = labels_cat, right = FALSE)
+}
+
+load_quali = replace(load_quali, is.na(load_quali), "très peu chargé")
+load_quali = cbind(load_quali, coord$bonus)
+
+
+names(load_quali)[names(load_quali) == "coord$bonus"] <- "bonus"
+
+load_quali$bonus[load_quali$bonus == 1] <- "colline"
+load_quali$bonus[load_quali$bonus == 0] <- "plaine"
+
+# Afficher les premières lignes du nouveau DataFrame
+head(load_quali)
+
+```
+
+
+
+
+# Vérification des données
+
+### Données manquantes
+```{r}
+sum(is.na(loading))
+sum(is.na(coord))
+```
+
+### Données dupliquées
+
+```{r}
+sum(duplicated(loading))
+```
+
+# Etude du remplissage des stations selon l'heure ou le jour
+
+```{r}
+days = c(0,24,48,72,96,120,144,168)
+i = 5
+
+plot(c(1:168),loading[i,],type="l",main = paste("Evolution de la disponibilité à la station",rownames(loading)[i]),cex=0.1)
+abline(v = days, col="red")
+abline(v = days+12, col="darkgreen",lty=2)
+
+```
+
+```{r}
+
+i_array = sample(1:1000,9)
+
+par(mfrow=c(3,3))
+for (i in 1:9) {
+    plot(c(1:168),loading[i_array[i],],type="l" ,xlab = row.names(loading[i,]))
+    abline(v = days, col="red")
+} 
+```
+```{r}
+plot(RemplissageMoyenHeure,type='l', main = "Remplissage moyen par heure")
+abline(v = days, col="red")
+abline(v = days+12, col="darkgreen",lty=2)
+abline(h = mean(RemplissageMoyenHeure), col = 'blue')
+plot(rowMeans(loading), type='l', main = "Remplissage moyen par station")
+abline(h = mean(RemplissageMoyenHeure), col = 'blue')
+```
+
+
+
+```{r}
+corrplot(cor(joursJourneeMoy),method="ellipse")
+corrplot(cor(joursNuitMoy),method="ellipse")
+corrplot(cor(cbind(joursJourneeMoy,joursNuitMoy)),method="ellipse")
+```
+
+
+
+```{r, fig.width = 15, fig.height=15}
+
+listPlot = list()
+h = 18
+hours = 24*c(0:6) + h
+nomJours = c("Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche")
+
+dfi = coord
+
+for (i in 1:7){
+  
+  dfi$loading = loading[,hours[i]]
+  listPlot[[i]] = ggplot(dfi, aes(x = longitude, y = latitude, color = loading)) + geom_point() + ggtitle(paste("Chargement des stations ",nomJours[i], "à",h,"heures."))
+}
+
+do.call(grid.arrange,c(listPlot,ncol=2))
+
+```
+
+```{r, fig.width = 15, fig.height=15}
+# Le lundi, à différentes heures
+
+hours = c(1, 6, 12, 18, 22)
+listPlot = list()
+dfi = coord
+
+for (i in 1:5){
+  dfi$loading = loading[,hours[i]]
+  
+  listPlot[[i]] = ggplot(dfi, aes(x = longitude, y = latitude, color = loading)) + geom_point() + ggtitle(paste("Chargement des stations lundi à",hours[i],"heures."))
+}
+
+do.call(grid.arrange,c(listPlot,ncol=2))
+
+```
+
+```{r}
+#Chargement moyen à 18h
+
+h = 18
+
+hours = 24*c(0:6) + h
+
+loading18h = loading[hours]
+head(loading18h)
+
+dfi = coord
+dfi$loading = rowMeans(loading18h)
+
+ggplot(dfi, aes(x = longitude, y = latitude, color = loading)) + geom_point() + ggtitle(paste("Chargement Moyen à",h,"heures"))
+
+```
+
+# Etude de l'altitude des stations du jeu de données
+
+```{r}
+pie(c(sum(coord$bonus == 1), sum(coord$bonus == 0)), label = c("Stations en altitude","Stations en plaine"))
+```
+
+
+```{r}
+dfi = coord
+ggplot(dfi, aes(x = longitude, y = latitude, color = bonus)) + geom_point() + ggtitle("Stations en altitude")
+```
+
+# Analyse en ACP
+
+```{r}
+
+data_scale = scale(loading)
+pca = PCA(data_scale,ncp = 5,graph=FALSE)
+
+data_pca = pca$ind$coord
+
+grid.arrange(
+    fviz_eig(pca), 
+    fviz_pca_var(pca,axes=c(1,2),label=""),
+    fviz_pca_var(pca,axes=c(2,3),label=""),
+    ncol=3
+)
+
+
+print(pca$eig[1:10,])
+```
+```{r}
+plot(pca$eig[,2], type = 'l', main = "Variance expliquée par composantes")
+plot(pca$eig[1:10,2], type = 'l', main = "Variance expliquée par les 10 premières composantes")
+
+
+plot(pca$var$coord[,2],type='l',col='blue', main = "Première et deuxième composante principale")
+lines(pca$var$coord[,1],type='l',col='red')
+
+
+fviz_pca_ind(pca, label ="" , title= "Graphe des individus suivant les composantes 1 & 2")
+fviz_pca_ind(pca, axes = c(1,3), label ="" , title= "Graphe des individus suivant les composantes 1 & 3")
+
+hab <- ifelse(RemplissageMoyenStation <= 0.4, 'faible',
+              ifelse(RemplissageMoyenStation <= 0.6, 'moyen', 'élevé'))
+fviz_pca_ind(pca,label="",habillage = as.factor(hab), title = "Graphes des individus colorés suivant le remplissage moyen")
+
+
+```
+
+```{r}
+corrplot(cor(joursMoy), method="ellipse")
+```
+
+```{r}
+joursScale = scale(joursMoy)
+pcaJours = PCA(joursScale,ncp = 5,graph=FALSE)
+
+summary(pcaJours)
+```
+```{r}
+plot(pcaJours$eig[1:5,2], type='l')
+
+fviz_pca_ind(pcaJours, label ="" , title= "Graphe des individus suivant les composantes 1 & 2")
+fviz_pca_ind(pcaJours, axes = c(1,3), label ="" , title= "Graphe des individus suivant les composantes 1 & 3")
+
+```
+
+```{r}
+grid.arrange(
+    fviz_eig(pcaJours), 
+    fviz_pca_var(pcaJours,axes=c(1,2)),
+    fviz_pca_var(pcaJours,axes=c(2,3)),
+    ncol=3
+)
+
+
+```
+
+
+
+
+
+
+
+
+
+```{r}
+library(leaflet)
+library(dplyr)
+
+# Set your Stadia Maps API key
+apikey <- "bdfc537c-e86b-4abb-8c63-4cedfa75cadd"
+
+j <- 0
+h <- 6
+jours_data <- loading[, j*24 + h] 
+pal <- colorNumeric(palette = "inferno", domain = jours_data)
+
+# Create a leaflet map
+map <- leaflet(data = coord) %>%
+  addProviderTiles(provider = leaflet::providers$Stadia.AlidadeSmooth, 
+                   options = providerTileOptions(apikey = apikey)) %>%
+  addCircles(lng = ~longitude, lat = ~latitude, color = ~pal(jours_data), 
+             fillOpacity = 0.8, radius = 40) %>%
+  addLegend( pal = pal, values = jours_data,
+            title = paste("Remplissage jour", j, "à", h, "h"),
+            opacity = 1)
+map
+
+```
+
+# ACP
+
+
+
+
+```{r}
+joursTR_Moy = cbind(joursJourneeMoy,joursNuitMoy)
+
+joursTR_scale = scale(joursTR_Moy)
+pcaJoursTR = PCA(joursTR_scale,ncp = 5,graph=FALSE)
+
+grid.arrange(
+    fviz_eig(pcaJoursTR), 
+    fviz_pca_var(pcaJoursTR,axes=c(1,2)),
+    ncol=2
+)
+
+fviz_pca_var(pcaJoursTR,axes=c(1,3))
+
+
+print(pcaJoursTR$eig)
+```
+
+```{r}
+plot(pcaJoursTR$eig[1:5,2], type='l')
+
+fviz_pca_ind(pcaJoursTR ,label = "", title= "Graphe des individus suivant les composantes 1 & 2")
+fviz_pca_ind(pcaJoursTR, axes = c(1,3) ,label = "", title= "Graphe des individus suivant les composantes 1 & 3")
+
+plot(pcaJoursTR$var$coord[,1],type='l',col='blue', main = "Première composante principale")
+plot(pcaJoursTR$var$coord[,2],type='l',col='red', main = "Deuxième composante principale")
+```
+
+
+
+
+## MCA 
+
+```{r}
+library(ade4)
+
+load_quali$bonus = as.factor(load_quali$bonus)
+acm = dudi.acm(load_quali, scannf = FALSE, nf = 5)
+
+fviz_screeplot(acm)
+```
+
+```{r}
+s.label(acm$co, clabel = 0.5)
+```
+
+```{r}
+library(RColorBrewer)
+s.class(acm$li, load_quali$bonus, col = brewer.pal(4, "Set1"))
+```
+
+
+# Clustering
+
+## K-means
+
+```{r}
+k = 7
+
+kmeans_pca = kmeans(data_pca, centers = k)
+barplot(table(kmeans_pca$cluster), main = "Effectif des stations dans chaque clusters", xlab = "Clusters", ylab = "Effectif")
+```
+### Visualisation des clusters
+
+```{r}
+pca_var_exp = 100*pca$eig/sum(pca$eig)
+
+ggplot(as.data.frame(data_pca), aes(x = pca$ind$coord[,1], y = pca$ind$coord[,2], color = as.factor(kmeans_pca$cluster))) +
+  geom_point() +
+  scale_color_discrete(name = "Cluster") +
+  labs(x = paste("Composante principale 1",substr(100*pca_var_exp[1],1,5),"%"), y = paste("Composante principale 2", substr(100*pca_var_exp[2],1,5),"%")) +
+  theme_minimal()
+
+```
+
+
+```{r}
+for(i in 1:k){
+  plot(colMeans(loading[kmeans_pca$cluster == i,]), type="l", main = paste("Chargement moyen du cluster",i), xlab ="Heures", ylab = "Chargement moyen")
+  abline(v = days, col="red")
+}
+```
+
+### Nombre de cluster idéal :
+
+```{r}
+fviz_nbclust(data_pca,method = 'wss', FUNcluster = kmeans)
+```
+
+```{r}
+fviz_nbclust(data_pca,method = 'silhouette', FUNcluster = kmeans)
+```
+
+Avec une autre fonction :
+```{r}
+NbClust(data_pca, method = 'kmeans', index = 'all',min.nc = 4, max.nc = 10)$Best.nc
+```
+
+```{r}
+for (k in 2:8){
+  km.res = kmeans(data_pca, centers = k, nstart = 25)
+  
+  sil = silhouette(km.res$cluster, dist(data_pca))
+  plot(sil, main = paste("Sihouette",k), col = rainbow(length(unique(km.res$cluster))), border = NA)
+  
+  abline(v = mean(sil[,3]))
+}
+```
+
+
+```{r}
+d = dist(data_pca)
+reskmeans3 = kmeans(data_pca,centers = 3)
+clusters_k3 = reskmeans3$cluster
+
+ggplot(as.data.frame(data_pca), aes(x = pca$ind$coord[,1], y = pca$ind$coord[,2], color = as.factor(clusters_k3))) +
+  geom_point() +
+  scale_color_discrete(name = "Cluster") +
+  labs(x = paste("Composante principale 1",substr(100*pca_var_exp[1],1,5),"%"), y = paste("Composante principale 2", substr(100*pca_var_exp[2],1,5),"%")) +
+  theme_minimal() + 
+  labs(subtitle="3 clusters",
+       title="K-means")
+
+
+reskmeans5 = kmeans(data_pca,centers = 5)
+clusters_k5 = reskmeans5$cluster
+
+ggplot(as.data.frame(data_pca), aes(x = pca$ind$coord[,1], y = pca$ind$coord[,2], color = as.factor(clusters_k5))) +
+  geom_point() +
+  scale_color_discrete(name = "Cluster") +
+  labs(x = paste("Composante principale 1",substr(100*pca_var_exp[1],1,5),"%"), y = paste("Composante principale 2", substr(100*pca_var_exp[2],1,5),"%")) +
+  theme_minimal() + 
+  labs(subtitle="5 clusters",
+       title="K-means")
+
+```
+
+
+
+```{r}
+#Clusters vs type of stations (hill or not)
+
+tbl = table(coord$bonus, clusters_k5)
+print(tbl)
+mosaicplot(tbl, color = c(3:5))
+```
+
+```{r}
+k = 5
+for(i in 1:k){
+  plot(colMeans(loading[kmeans_pca$cluster == i,]), type="l", main = paste("Chargement moyen du cluster",i), xlab ="Heures", ylab = "Chargement moyen")
+  abline(v = days, col="red")
+}
+```
+
+### Affichage sur la carte de Paris
+
+#### Avec données ACP
+```{r}
+# Set your Stadia Maps API key
+apikey <- "bdfc537c-e86b-4abb-8c63-4cedfa75cadd"
+
+register_stadiamaps(apikey, write = TRUE)
+
+#bbox <- c(left = 24.61, bottom = 59.37, right = 24.94, top = 59.5)
+#get_stadiamap(bbox, zoom = 12, maptype = "stamen_toner_lite") %>% ggmap()
+
+qmplot(longitude, latitude,data = coord, maptype = "stamen_toner_lite",color=clusters_k5,) +
+    labs(title = paste("Clusters")) + scale_color_gradient(low = "blue", high ="green")
+```
+
+
+```{r}
+
+# leaflet
+
+num_clusters = 5
+
+pal <- colorRampPalette(c("blue", "green"))(num_clusters)
+
+
+colors <- colorFactor(palette = pal, domain = unique(clusters_k5))
+
+map <- leaflet(coord) %>%
+  addProviderTiles(provider = providers$Stadia.AlidadeSmooth, 
+                   options = providerTileOptions(apikey = apikey)) %>%
+  addCircles(lng = ~longitude, lat = ~latitude, color =  ~colors(clusters_k5),
+             opacity = 1, fillOpacity = 0.8, radius = 50) %>%
+  addLegend("bottomright", pal = colors, values = ~clusters_k5,
+            title = "5 Clusters ",
+            opacity = 1)
+
+# Print the map
+print(map)
+```
+
+
+#### Avec Données Brutes
+
+```{r}
+# Set your Stadia Maps API key
+apikey <- "bdfc537c-e86b-4abb-8c63-4cedfa75cadd"
+
+reskmeans5_brut = kmeans(data_scale, centers = 5)
+clusters_k5_brut = reskmeans5_brut$cluster
+
+register_stadiamaps(apikey, write = TRUE)
+
+#bbox <- c(left = 24.61, bottom = 59.37, right = 24.94, top = 59.5)
+#get_stadiamap(bbox, zoom = 12, maptype = "stamen_toner_lite") %>% ggmap()
+
+qmplot(longitude, latitude,data = coord, maptype = "stamen_toner_lite",color=clusters_k5_brut,) +
+    labs(title = paste("Clusters, données brutes")) + scale_color_gradient(low = "blue", high ="green")
+```
+
+```{r}
+# leaflet
+
+num_clusters = 5
+
+pal <- colorRampPalette(c("blue", "green"))(num_clusters)
+
+
+colors <- colorFactor(palette = pal, domain = unique(clusters_k5_brut))
+
+map <- leaflet(coord) %>%
+  addProviderTiles(provider = providers$Stadia.AlidadeSmooth, 
+                   options = providerTileOptions(apikey = apikey)) %>%
+  addCircles(lng = ~longitude, lat = ~latitude, color =  ~colors(clusters_k5_brut),
+             opacity = 1, fillOpacity = 0.8, radius = 50) %>%
+  addLegend("bottomright", pal = colors, values = ~clusters_k5_brut,
+            title = "5 Clusters ",
+            opacity = 1)
+
+# Print the map
+print(map)
+```
+
+
+```{r}
+confusionMatrix(as.factor(clusters_k5),as.factor(clusters_k5_brut))
+```
+
+```{r}
+barplot(table(clusters_k5), main = "Effectif des stations dans chaque clusters", xlab = "Clusters", ylab = "Effectif")
+```
+
+
+```{r}
+p = 45 # Nombre d'individus
+
+
+
+for (cluster in 1:5) {
+  indices_cluster <- which(clusters_k5 == cluster)
+  profiles = list()
+  mean_loading = matrix(,4,ncol(loading))
+  
+  for (i in 1:4) {
+    
+    sample_indices <- sample(indices_cluster, p)
+    mean_loading[i,] <- colMeans(loading[sample_indices, ])
+  }
+  matplot(1:ncol(mean_loading), t(mean_loading), type='l', main=paste("Chargement moyen pour le cluster",cluster),xlab ="Heures", ylab = "Chargement moyen")
+  
+legend("topright", legend = c("Groupe 1","Groupe 2","Groupe 3","Groupe 4"), col = 1:4,lty = 1)
+}
+
+```
+
+
+
+
+
+## GMM
+
+```{r}
+gmm_model <- Mclust(data_pca,G=1:6)
+summary(gmm_model)
+
+print(paste("Nombre de clusters optimal",gmm_model$G))
+```
+
+
+```{r}
+gmm_model$BIC
+
+resBIC = Mclust(data_pca,G=2:30, modelNames = "VII")
+summary(resBIC)
+```
+
+
+```{r}
+
+ggplot(as.data.frame(data_pca), aes(x = pca$ind$coord[,1], y = pca$ind$coord[,2], color = as.factor(gmm_model$classification))) +
+  geom_point() +
+  scale_color_discrete(name = "Cluster") +
+  labs(x = paste("Composante principale 1",substr(pca$eig[1],1,5),"%"), y = paste("Composante principale 2", substr(pca$eig[2],1,5),"%")) +
+  theme_minimal()
+
+clusters_gmm = gmm_model$classification
+```
+
+
+```{r}
+
+profile1 = colMeans(loading[which(clusters_gmm == 1),])
+profile2 = colMeans(loading[which(clusters_gmm == 2),])
+profile3 = colMeans(loading[which(clusters_gmm == 3),])
+profile4 = colMeans(loading[which(clusters_gmm == 4),])
+profile5 = colMeans(loading[which(clusters_gmm == 5),])
+profile6 = colMeans(loading[which(clusters_gmm == 6),])
+
+profiles_gmm = cbind(profile1,profile2,profile3,profile4, profile5,profile6)
+
+corrplot(cor(profiles_gmm),method = "ellipse")
+
+max(cor(profiles_gmm))
+```
+
+
+
+
+
+```{r}
+gmm_model4 = Mclust(data_pca,G=4, modelNames = "VVE")
+summary(gmm_model4)
+clusters_gmm4 = gmm_model4$classification
+```
+
+
+```{r}
+gmm_model_5_spherical = Mclust(data_pca, G=5, modelNames = "VII")
+clusters_gmm5_spherical = gmm_model_5_spherical$classification
+```
+```{r}
+#Clusters vs type of stations (hill or not)
+
+tbl = table(coord$bonus, clusters_gmm5_spherical)
+print(tbl)
+mosaicplot(tbl, color = c(3:5))
+```
+```{r}
+p = 45 # Nombre d'individus
+
+
+
+for (cluster in 1:5) {
+  indices_cluster <- which(clusters_gmm5_spherical == cluster)
+  profiles = list()
+  mean_loading = matrix(,4,ncol(loading))
+  
+  for (i in 1:4) {
+    
+    sample_indices <- sample(indices_cluster, p)
+    mean_loading[i,] <- colMeans(loading[sample_indices, ])
+  }
+  matplot(1:ncol(mean_loading), t(mean_loading), type='l', main=paste("Chargement moyen pour le cluster",cluster),xlab ="Heures", ylab = "Chargement moyen")
+  
+legend("topright", legend = c("Groupe 1","Groupe 2","Groupe 3","Groupe 4"), col = 1:4,lty = 1)
+}
+
+```
+
+
+## Clustering with CAH
+```{r}
+
+hclustsingle = hclust(d, method="single")
+hclustcomplete = hclust(d, method="complete")
+hclustaverage = hclust(d, method="average")
+hclustward = hclust(d, method="ward.D")
+
+#fviz_dend(hclustsingle)
+#fviz_dend(hclustcomplete)
+#fviz_dend(hclustaverage)
+#fviz_dend(hclustward)
+```
+
+
+
+```{r}
+nodePar <- list(lab.cex = 0.2, pch = c(NA, 19), 
+                cex = 0.5, col = "red")
+
+plot(as.dendrogram(hclustsingle), main = "Single Linkage", ylab = "Height", nodePar = nodePar, leaflab = "none",edgePar = list(col = 2:3, lwd = 2:1))
+
+plot(as.dendrogram(hclustcomplete), main = "Complete Linkage",ylab = "Height", nodePar = nodePar, leaflab = "none",edgePar = list(col = 2:3, lwd = 2:1))
+
+plot(as.dendrogram(hclustaverage), main = "Average Linkage", ylab = "Height", nodePar = nodePar, leaflab = "none",edgePar = list(col = 2:3, lwd = 2:1))
+
+plot(as.dendrogram(hclustward), main = "Ward Linkage", ylab = "Height", nodePar = nodePar, leaflab = "none",edgePar = list(col = 2:3, lwd = 2:1),hang = -1)
+
+``` 
+
+
+
+```{r}
+reshclust1 = cutree(hclustward, 4)
+reshclust2 = cutree(hclustaverage, 4)
+reshclust3 = cutree(hclustcomplete, 4)
+reshclust4 = cutree(hclustsingle, 4)
+#fviz_dend(hclustward, k=4, show_labels=FALSE, rect=TRUE)
+```
+
+```{r}
+clusters_cah1 = unname(reshclust1)
+clusters_cah2 = unname(reshclust2)
+clusters_cah3 = unname(reshclust3)
+clusters_cah4 = unname(reshclust4)
+```
+
+
+```{r}
+ggplot(as.data.frame(data_pca), aes(x = pca$ind$coord[,1], y = pca$ind$coord[,2], color = as.factor(clusters_cah1))) +
+  geom_point() +
+  scale_color_discrete(name = "Cluster avec Ward linkage") +
+  labs(x = paste("Composante principale 1",substr(100*pca_var_exp[1],1,5),"%"), y = paste("Composante principale 2", substr(100*pca_var_exp[2],1,5),"%")) +
+  theme_minimal()
+
+```
+
+```{r}
+ggplot(as.data.frame(data_pca), aes(x = pca$ind$coord[,1], y = pca$ind$coord[,2], color = as.factor(clusters_cah2))) +
+  geom_point() +
+  scale_color_discrete(name = "Cluster avec average linkage") +
+  labs(x = paste("Composante principale 1",substr(100*pca_var_exp[1],1,5),"%"), y = paste("Composante principale 2", substr(100*pca_var_exp[2],1,5),"%")) +
+  theme_minimal()
+
+```
+
+
+```{r}
+ggplot(as.data.frame(data_pca), aes(x = pca$ind$coord[,1], y = pca$ind$coord[,2], color = as.factor(clusters_cah3))) +
+  geom_point() +
+  scale_color_discrete(name = "Cluster complete linkage") +
+  labs(x = paste("Composante principale 1",substr(100*pca_var_exp[1],1,5),"%"), y = paste("Composante principale 2", substr(100*pca_var_exp[2],1,5),"%")) +
+  theme_minimal()
+
+```
+
+```{r}
+ggplot(as.data.frame(data_pca), aes(x = pca$ind$coord[,1], y = pca$ind$coord[,2], color = as.factor(clusters_cah4))) +
+  geom_point() +
+  scale_color_discrete(name = "Cluster Single linkage") +
+  labs(x = paste("Composante principale 1",substr(100*pca_var_exp[1],1,5),"%"), y = paste("Composante principale 2", substr(100*pca_var_exp[2],1,5),"%")) +
+  theme_minimal()
+
+```
+
+
+
+```{r}
+p = 45 # Nombre d'individus
+
+
+
+for (cluster in 1:4) {
+  indices_cluster <- which(clusters_cah1 == cluster)
+  profiles = list()
+  mean_loading = matrix(,4,ncol(loading))
+  
+  for (i in 1:4) {
+    
+    sample_indices <- sample(indices_cluster, p)
+    mean_loading[i,] <- colMeans(loading[sample_indices, ])
+  }
+  matplot(1:ncol(mean_loading), t(mean_loading), type='l', main=paste("Chargement moyen pour le cluster WARD",cluster),xlab ="Heures", ylab = "Chargement moyen")
+  
+legend("topright", legend = c("Groupe 1","Groupe 2","Groupe 3","Groupe 4"), col = 1:4,lty = 1)
+}
+
+```
+
+```{r}
+
+# Set your Stadia Maps API key
+apikey <- "bdfc537c-e86b-4abb-8c63-4cedfa75cadd"
+
+register_stadiamaps(apikey, write = TRUE)
+
+#bbox <- c(left = 24.61, bottom = 59.37, right = 24.94, top = 59.5)
+#get_stadiamap(bbox, zoom = 12, maptype = "stamen_toner_lite") %>% ggmap()
+
+qmplot(longitude, latitude,data = coord, maptype = "stamen_toner_lite",color=clusters_cah1,) +
+    labs(title = paste("Clusters")) + scale_color_gradient(low = "blue", high ="green")
+
+
+
+profile1 = colMeans(loading[which(clusters_cah1 == 1),])
+profile2 = colMeans(loading[which(clusters_cah1 == 2),])
+profile3 = colMeans(loading[which(clusters_cah1 == 3),])
+profile4 = colMeans(loading[which(clusters_cah1 == 4),])
+
+
+min_value <- min(c(profile1, profile2, profile3, profile4))
+max_value <- max(c(profile1, profile2, profile3, profile4))
+
+plot(profile1, type = 'l', col = "blue", ylim = c(min_value, max_value), xlab = "Heures", ylab = "Chargement moyen")
+lines(profile2,type='l', col = "grey")
+lines(profile3,type='l', col = "green")
+abline(v = days, col="red")
+```
+
+
+
+```{r}
+#Clusters vs type of stations (hill or not)
+
+tbl = table(coord$bonus, clusters_cah1)
+print(tbl)
+mosaicplot(tbl, color = c(2:5))
+```
+
+Map avec différentes méthodes de clusters :
+
+```{r}
+#confusionMatrix(as.factor(clusters_k4), as.factor(clusters_cah1))
+confusionMatrix(as.factor(clusters_gmm4), as.factor(clusters_cah1))
+confusionMatrix(as.factor(clusters_k5), as.factor(clusters_gmm5_spherical))
+```
+
+On constate que les clusters trouvés avec les différentes classifications ne sont pas ordonnés de la même manière. ON propose alors un fonction pour les réordonner :
+
+```{r}
+clusterRearrange <- function(classif1, classif2) {
+  
+  confMatrix <- table(classif1, classif2)
+  listMax <- apply(confMatrix, 2, which.max)
+  
+  confMatrix2 <- matrix(0, nrow = nrow(confMatrix), ncol = ncol(confMatrix))
+  
+  for (i in 1:length(listMax)) {
+    confMatrix2[i, ] <- confMatrix[listMax[i], ]
+  }
+  
+  classIndices <- numeric(length(classif2))
+  
+  for (i in 1:length(classif2)) {
+    for (j in 1:nrow(confMatrix)) {
+      if (classif2[i] == j) {
+        classIndices[i] <- listMax[j]
+        break
+      }
+    }
+  }
+  
+  classif2_rearranged <- classif2
+
+  for (i in 1:length(classif2)) {
+    classif2_rearranged[i] = classIndices[i]
+  }
+  return(classif2_rearranged)
+}
+
+```
+
+Cette fonction renvoie un vecteur identique au deuxième cluster passé en paramètres mais réarrangé suivant le premier.
+
+
+```{r}
+
+reshclust_rearranged = clusterRearrange(clusters_gmm4, clusters_cah1)
+
+clusters_gmm5_rearranged = clusterRearrange(clusters_k5, clusters_gmm5_spherical)
+```
+
+
+
+```{r}
+
+# Set your Stadia Maps API key
+apikey <- "bdfc537c-e86b-4abb-8c63-4cedfa75cadd"
+
+register_stadiamaps(apikey, write = TRUE)
+
+#bbox <- c(left = 24.61, bottom = 59.37, right = 24.94, top = 59.5)
+#get_stadiamap(bbox, zoom = 12, maptype = "stamen_toner_lite") %>% ggmap()
+
+qmplot(longitude, latitude,data = coord, maptype = "stamen_toner_lite",color=clusters_k5,) +
+    labs(title = paste("Clusters with k-means (5 clusters)")) + scale_color_gradient(name = "Clusters",low = "blue", high ="green")
+
+
+qmplot(longitude, latitude,data = coord, maptype = "stamen_toner_lite",color=clusters_cah1,) +
+    labs(title = paste("Clusters with CAH, Ward (4 clusters)")) + scale_color_gradient(name = "Clusters",low = "blue", high ="green")
+
+qmplot(longitude, latitude,data = coord, maptype = "stamen_toner_lite",color=clusters_gmm5_spherical,) +
+    labs(title = paste("Clusters with GMM (5 clusters)")) + scale_color_gradient(name = "Clusters",low = "blue", high ="green")
+
+qmplot(longitude, latitude,data = coord, maptype = "stamen_toner_lite",color=clusters_gmm4,) +
+    labs(title = paste("Clusters with GMM (4 clusters)")) + scale_color_gradient(name = "Clusters",low = "blue", high ="green")
+
+```
+```{r, fig.width = 10, fig.height=10}
+p1 <- ggplot(data_pca, aes(x =  pca$ind$coord[,1], y =  pca$ind$coord[,2], color = as.factor(clusters_gmm5_spherical))) +
+  geom_point(alpha = 0.7) +
+  scale_color_discrete(name = "GMM Clustering") +
+  labs(x = paste("Composante Principale 1 (", round(100 * pca_var_exp[1], 1), "%)", sep=""),
+       y = paste("Composante Principale 2 (", round(100 * pca_var_exp[2], 1), "%)", sep="")) +
+  theme_minimal()  
+
+p2 <- ggplot(data_pca, aes(x =  pca$ind$coord[,1], y =  pca$ind$coord[,2], color = as.factor(clusters_k5))) +
+  geom_point(alpha = 0.7) +
+  scale_color_discrete(name = "KMeans Clustering") +
+  labs(x = paste("Composante Principale 1 (", round(100 * pca_var_exp[1], 1), "%)", sep=""),
+       y = paste("Composante Principale 2 (", round(100 * pca_var_exp[2], 1), "%)", sep="")) +
+  theme_minimal()
+
+p3 <- ggplot(data_pca, aes(x =  pca$ind$coord[,1], y =  pca$ind$coord[,2], color = as.factor(clusters_cah1))) +
+  geom_point(alpha = 0.7) +
+  scale_color_discrete(name = "CAH avec Liaison Ward") +
+  labs(x = paste("Composante Principale 1 (", round(100 * pca_var_exp[1], 1), "%)", sep=""),
+       y = paste("Composante Principale 2 (", round(100 * pca_var_exp[2], 1), "%)", sep="")) +
+  theme_minimal()
+
+# Combine the plots
+grid.arrange(p1, p2, p3)
+```
+
